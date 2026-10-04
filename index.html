@@ -1635,7 +1635,10 @@ return sig;
                 const weekRows = Object.keys(byWeek).sort().map(w => [w, byWeek[w].count, roundClient(byWeek[w].diesel, 1), formatHoursMinutes(byWeek[w].hours)]);
                 y2 = drawSimpleTable(doc, ['Week', 'Inspections', 'Diesel (L)', 'Run Hours'], weekRows, mL, y2, cW);
                                 // ⭐ NEW: Attention Items Analysis
-                y2 = drawAnalysisSection(doc, 'Attention Items — Unchecked (X) on Field Checklists', mL, y2, cW);
+y2 = drawAnalysisSection(doc, 'Anomalies Found During Inspections', mL, y2, cW, {
+    fillColor: [255, 235, 235],
+    textColor: [179, 58, 58]
+});
 
                 const attentionMap = {};
                 ALL_CHECK_ITEMS.forEach(item => {
@@ -1663,10 +1666,10 @@ return sig;
 
                 if (attentionRows.length === 0) {
                     doc.setFont('helvetica', 'italic'); doc.setFontSize(8); doc.setTextColor(27, 107, 63);
-                    doc.text('No unchecked items found in this period — all field checks passed.', mL, y2);
+                 doc.text('Total anomalies detected: ' + totalX + ' across ' + attentionRows.length + ' distinct item(s).', mL, y2);
                     y2 += 6;
                 } else {
-                    y2 = drawSimpleTable(doc, ['Checklist Item', 'Times Unchecked', 'Affected Generators'], attentionRows, mL, y2, cW);
+                  y2 = drawSimpleTable(doc, ['Checklist Item', 'Times Flagged', 'Affected Generators'], attentionRows, mL, y2, cW);
                     const totalX = attentionRows.reduce((s, r) => s + r[1], 0);
                     doc.setFont('helvetica', 'italic'); doc.setFontSize(7.5); doc.setTextColor(179, 58, 58);
                     doc.text('Total attention flags: ' + totalX + ' across ' + attentionRows.length + ' distinct item(s).', mL, y2);
@@ -1928,7 +1931,17 @@ return sig;
                 }
             }
 
-            function drawAnalysisSection(doc, title, x, y, w) { doc.setFillColor(238, 246, 252); doc.rect(x, y - 4, w, 6, 'F'); doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(18, 64, 94); doc.text(title, x + 2, y); return y + 6; }
+           function drawAnalysisSection(doc, title, x, y, w, options) {
+    options = options || {};
+    const fillColor = options.fillColor || [238, 246, 252];
+    const textColor = options.textColor || [18, 64, 94];
+    doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
+    doc.rect(x, y - 4, w, 6, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+    doc.setTextColor(textColor[0], textColor[1], textColor[2]);
+    doc.text(title, x + 2, y);
+    return y + 6;
+}
             function drawSimpleTable(doc, headers, rows, x, y, w) {
                 if (rows.length === 0) { doc.setFont('helvetica', 'italic'); doc.setFontSize(8); doc.setTextColor(150, 170, 190); doc.text('(no data)', x, y + 4); return y + 8; }
                 const colCount = headers.length; const colW = w / colCount; const rowH = 6;
