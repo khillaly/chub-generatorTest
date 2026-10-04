@@ -1233,9 +1233,32 @@
             async function generatePDF(records) {
                 const { jsPDF } = window.jspdf; const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
                 const pageWidth = doc.internal.pageSize.getWidth(); const pageHeight = doc.internal.pageSize.getHeight(); const margin = 16; const contentWidth = pageWidth - margin * 2;
-                const allSignatures = loadSignatures(); const sigDimensions = {};
+                               // ⭐ NEW: Pre-fetch any missing signatures from cloud
+                let allSignatures = loadSignatures(); const sigDimensions = {};
+                const techsInRecords = new Set(records.map(r => safeStr(r['Technician'] || r.technician || '')).filter(Boolean));
+                for (const t of techsInRecords) {
+                    if (!allSignatures[t]) {
+                        try {
+                            const res = await fetch(GOOGLE_SHEET_URL + '?type=config&_ts=' + Date.now(), { cache: 'no-store' });
+                            const json = await res.json();
+                            const cfg = json.config || {};
+                            const cloudSig = cfg['TechSig_' + t];
+                            if (cloudSig) { saveSignatureFor(t, cloudSig); allSignatures[t] = cloudSig; }
+                        } catch (e) { console.warn('Could not fetch signature for ' + t, e); }
+                    }
+                }
                 for (const [techName, dataUrl] of Object.entries(allSignatures)) { if (dataUrl) { const dims = await loadImageDimensions(dataUrl); if (dims) sigDimensions[techName] = dims; } }
-                const inchargeSigData = getInchargeSignatureCached(); let inchargeSigDims = null; if (inchargeSigData) inchargeSigDims = await loadImageDimensions(inchargeSigData);
+                               // ⭐ NEW: Fetch in-charge signature if missing
+                let inchargeSigData = getInchargeSignatureCached();
+                if (!inchargeSigData) {
+                    try {
+                        const res = await fetch(GOOGLE_SHEET_URL + '?type=config&_ts=' + Date.now(), { cache: 'no-store' });
+                        const json = await res.json();
+                        const cfg = json.config || {};
+                        if (cfg.InchargeSignature) { setInchargeSignatureCached(cfg.InchargeSignature); inchargeSigData = cfg.InchargeSignature; }
+                    } catch (e) { console.warn('Could not fetch in-charge signature', e); }
+                }
+                let inchargeSigDims = null; if (inchargeSigData) inchargeSigDims = await loadImageDimensions(inchargeSigData);
 
                 function addHeader(data) {
                     try { doc.addImage('chub-logo.png', 'PNG', margin, margin - 2, 22, 10); } catch (e) { doc.setFontSize(13); doc.setFont('helvetica', 'bolditalic'); doc.setTextColor(106, 141, 176); doc.text('CHUB', margin, margin + 5); }
@@ -1430,9 +1453,35 @@
                 if (!consIndex) consIndex = buildConsumptionIndex(records);
                 const { jsPDF } = window.jspdf; const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
                 const pageW = 210, pageH = 297, mL = 14, mR = 14; const cW = pageW - mL - mR;
-                const allSignatures = loadSignatures(); const sigDimensions = {};
+                            // ⭐ NEW: Pre-fetch any missing signatures from cloud BEFORE building the PDF
+                let allSignatures = loadSignatures(); const sigDimensions = {};
+                const techsInRecords = new Set(records.map(r => safeStr(r['Technician'] || r.technician || '')).filter(Boolean));
+                for (const t of techsInRecords) {
+                    if (!allSignatures[t]) {
+                        try {
+                            console.log('🔍 Signature missing locally for ' + t + ' — fetching from cloud...');
+                            const res = await fetch(GOOGLE_SHEET_URL + '?type=config&_ts=' + Date.now(), { cache: 'no-store' });
+                            const json = await res.json();
+                            const cfg = json.config || {};
+                            const cloudSig = cfg['TechSig_' + t];
+                            if (cloudSig) {
+                                saveSignatureFor(t, cloudSig);
+                                allSignatures[t] = cloudSig;
+                                console.log('✅ Fetched signature for ' + t);
+                            }
+                        } catch (e) { console.warn('Could not fetch signature for ' + t, e); }
+                    }
+                }
                 for (const [techName, dataUrl] of Object.entries(allSignatures)) { if (dataUrl) { const dims = await loadImageDimensions(dataUrl); if (dims) sigDimensions[techName] = dims; } }
-                let inchargeSigData = getInchargeSignatureCached() || currentInchargeSignature; if (!inchargeSigData) inchargeSigData = await fetchInchargeSignatureFromCloud();
+                                let inchargeSigData = getInchargeSignatureCached() || currentInchargeSignature;
+                if (!inchargeSigData) {
+                    try {
+                        const res = await fetch(GOOGLE_SHEET_URL + '?type=config&_ts=' + Date.now(), { cache: 'no-store' });
+                        const json = await res.json();
+                        const cfg = json.config || {};
+                        if (cfg.InchargeSignature) { setInchargeSignatureCached(cfg.InchargeSignature); inchargeSigData = cfg.InchargeSignature; }
+                    } catch (e) { console.warn('Could not fetch in-charge signature', e); }
+                }
                 let inchargeSigDims = null; if (inchargeSigData) inchargeSigDims = await loadImageDimensions(inchargeSigData);
                 const currentTech = technicianSelect.value || '—'; const currentTechSig = allSignatures[currentTech] || ''; const currentTechDims = sigDimensions[currentTech];
 
@@ -1602,11 +1651,18 @@
                     const uniquePrefix = 'ABCDEF0123456789';
                     const placeholderHex = (uniquePrefix + '0'.repeat(SIG_HEX_LEN - uniquePrefix.length)).substring(0, SIG_HEX_LEN);
 
-                    // 3. Create signature dictionary
+                                  // 3. Create signature dictionary WITH ByteRange placeholder
+                    const byteRangeArr = PDFArray.withContext(ctx);
+                    byteRangeArr.push(PDFNumber.of(0));
+                    byteRangeArr.push(PDFNumber.of(7777777777));
+                    byteRangeArr.push(PDFNumber.of(7777777777));
+                    byteRangeArr.push(PDFNumber.of(7777777777));
+
                     const sigDict = ctx.obj({
                         Type: 'Sig',
                         Filter: 'Adobe.PPKLite',
                         SubFilter: 'adbe.pkcs7.detached',
+                        ByteRange: byteRangeArr,
                         Contents: PDFHexString.of(placeholderHex),
                         M: PDFString.fromDate(new Date()),
                         Name: PDFString.of(CERT_STATE.subject || 'CHUB Technician'),
@@ -1655,55 +1711,25 @@
                     const contentsHexStart = placeholderIdx;
                     const contentsHexEnd = contentsHexStart + SIG_HEX_LEN;
 
-                    // 8. Insert a clean ByteRange keyword with computed values
-                    // We insert our own /ByteRange before the /Contents keyword in the sig dict.
-                    // pdf-lib writes: /Contents <...> /M ... - we need to add /ByteRange before /Contents.
-                    // Easier approach: replace existing placeholder if present; otherwise insert fresh.
+                                      // 8. Locate our ByteRange placeholder (with 7777777777 values)
                     const byteRange = [0, contentsHexStart, contentsHexEnd, uint8.length - contentsHexEnd];
                     const byteRangeStr = `/ByteRange [0 ${byteRange[1]} ${byteRange[2]} ${byteRange[3]}]`;
-
-                    // Find the /Contents keyword position (before the placeholder)
-                    const contentsKeywordIdx = pdfStr.lastIndexOf('/Contents', placeholderIdx);
-                    if (contentsKeywordIdx === -1) { console.error('/Contents keyword not found'); return null; }
-
-                    // Check if there's already a /ByteRange before /Contents that we can overwrite
-                    const beforeContents = pdfStr.substring(Math.max(0, contentsKeywordIdx - 200), contentsKeywordIdx);
-                    const existingBRMatch = beforeContents.match(/\/ByteRange\s*\[[^\]]*\]/);
-
-                    if (existingBRMatch) {
-                        // Overwrite existing placeholder ByteRange with computed values
-                        const brStartInBefore = beforeContents.lastIndexOf(existingBRMatch[0]);
-                        const brAbsIdx = Math.max(0, contentsKeywordIdx - 200) + brStartInBefore;
-                        const brPadded = byteRangeStr.padEnd(existingBRMatch[0].length, ' ');
-                        const brBytes = new TextEncoder().encode(brPadded);
-                        uint8.set(brBytes, brAbsIdx);
-                    } else {
-                        // pdf-lib didn't write a ByteRange. We need to inject one.
-                        // Since /ByteRange comes before /Contents in the dict, we need space.
-                        // We'll replace the placeholder hex prefix with our ByteRange + padding, then move contents.
-                        // Simpler: prepend /ByteRange inside the hex placeholder region is impossible.
-                        // Instead: since we reserved a large hex block, we can split it.
-                        // Better strategy: re-save with manual sig dict insertion
-                        console.warn('No existing ByteRange — injecting new one is complex. Using fallback.');
-                        // Fallback: replace the placeholder region with (padded /ByteRange) + real contents
-                        // Since Contents is later in the dict, we can afford to overwrite earlier bytes.
-                        // Find the "<<" that starts the sig dict
-                        const dictStartIdx = pdfStr.lastIndexOf('<<', contentsKeywordIdx);
-                        if (dictStartIdx === -1) { console.error('Sig dict start not found'); return null; }
-                        // Build a replacement: (spaces) + /ByteRange [...] + (existing content)
-                        // We can overwrite the placeholder hex prefix with our ByteRange if it fits.
-                        // Actually simplest: overwrite the placeholder hex start with '/ByteRange [...]' and pad.
-                        const brInsertPos = contentsKeywordIdx - 2; // just before /Contents
-                        // We'll need the /ByteRange text to fit in the space between dictStart and /Contents.
-                        // That space is typically small, so prepend approach won't work.
-                        // Fallback: use the placeholder hex region itself to store /ByteRange - but then Contents would shift.
-                        // Simplest reliable fix: put /ByteRange in front of the /Contents value by replacing the placeholder hex start.
-                        // We reserve extra room before the hex placeholder: we cannot. 
-                        // Real fix: modify the sig dict to include ByteRange placeholder BEFORE /Contents
-                        // So we need to add ByteRange to the sigDict at obj creation time.
-                        console.error('ByteRange injection required but not supported in this run.');
+                    const brRegex = /\/ByteRange\s*\[\s*0\s+7777777777\s+7777777777\s+7777777777\s*\]/;
+                    const brMatch = pdfStr.match(brRegex);
+                    if (!brMatch) {
+                        console.error('ByteRange placeholder not found.');
+                        const brKwIdx = pdfStr.indexOf('/ByteRange');
+                        if (brKwIdx !== -1) {
+                            console.error('Actual text:', JSON.stringify(pdfStr.substring(brKwIdx, brKwIdx + 120)));
+                        } else {
+                            console.error('/ByteRange keyword missing entirely');
+                        }
                         return null;
                     }
+                    const brIdx = pdfStr.indexOf(brMatch[0]);
+                    const brPadded = byteRangeStr.padEnd(brMatch[0].length, ' ');
+                    const brBytes = new TextEncoder().encode(brPadded);
+                    uint8.set(brBytes, brIdx);
 
                     // 9. Compute SHA-256 over byte ranges
                     const data1 = uint8.slice(byteRange[0], byteRange[0] + byteRange[1]);
