@@ -728,35 +728,36 @@
                 });
             }
 
-          async function pushTechnicianSignatureToCloud(techName, dataUrl) {
-               if (!techName || techName.trim() === '') {
-        console.warn('Cannot upload signature — technician name is empty');
-        return;
-    try {
-        // Strip the "data:image/png;base64," prefix — send only the raw Base64
-        let cleanBase64 = dataUrl;
-        if (cleanBase64.startsWith('data:')) {
-            cleanBase64 = cleanBase64.split(',')[1];
-        }
-        await fetch(GOOGLE_SHEET_URL, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({
-                action: 'config_set_drive',
-                key: 'TechSig_' + techName,
-                value: cleanBase64,
-                mimeType: 'image/png',
-                fileName: 'Sig_' + techName.replace(/\s+/g, '_') + '.png'
-            })
-        });
-    } catch (e) { console.warn('Could not sync visual signature', e); }
-}
-
-            async function pushPFXToCloud(techName, pfxBase64) {
-                   if (!techName || techName.trim() === '') {
+                  async function pushTechnicianSignatureToCloud(techName, dataUrl) {
+                if (!techName || techName.trim() === '') {
+                    console.warn('Cannot upload signature — technician name is empty');
+                    return;
+                }
+                try {
+                    // Strip the "data:image/png;base64," prefix — send only the raw Base64
+                    let cleanBase64 = dataUrl;
+                    if (cleanBase64.startsWith('data:')) {
+                        cleanBase64 = cleanBase64.split(',')[1];
+                    }
+                    await fetch(GOOGLE_SHEET_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                        body: JSON.stringify({
+                            action: 'config_set_drive',
+                            key: 'TechSig_' + techName,
+                            value: cleanBase64,
+                            mimeType: 'image/png',
+                            fileName: 'Sig_' + techName.replace(/\s+/g, '_') + '.png'
+                        })
+                    });
+                } catch (e) { console.warn('Could not sync visual signature', e); }
+            }
+                     async function pushPFXToCloud(techName, pfxBase64) {
+                if (!techName || techName.trim() === '') {
                     console.warn('Cannot upload PFX — technician name is empty');
                     return;
+                }
                 try {
                     await fetch(GOOGLE_SHEET_URL, {
                         method: 'POST', mode: 'no-cors',
@@ -765,7 +766,6 @@
                     });
                 } catch (e) { console.warn('Could not sync PFX', e); }
             }
-
            async function pushInchargeSignatureToCloud(sigB64) {
     try {
         let cleanBase64 = sigB64;
