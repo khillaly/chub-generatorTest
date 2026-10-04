@@ -1732,13 +1732,24 @@
                     uint8.set(brBytes, brIdx);
 
                     // 9. Compute SHA-256 over byte ranges
-                    const data1 = uint8.slice(byteRange[0], byteRange[0] + byteRange[1]);
+                                       const data1 = uint8.slice(byteRange[0], byteRange[0] + byteRange[1]);
                     const data2 = uint8.slice(byteRange[2], byteRange[2] + byteRange[3]);
                     const md = forge.md.sha256.create();
-                    md.update(forge.util.binary.raw.encode(data1));
-                    md.update(forge.util.binary.raw.encode(data2));
+                    // ⭐ Feed data in small chunks to avoid "Maximum call stack size exceeded"
+                    function feedForgeInChunks(mdInstance, bytes, chunkSize) {
+                        chunkSize = chunkSize || 4096;
+                        for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+                            const end = Math.min(offset + chunkSize, bytes.length);
+                            let chunkStr = '';
+                            for (let i = offset; i < end; i++) {
+                                chunkStr += String.fromCharCode(bytes[i]);
+                            }
+                            mdInstance.update(chunkStr);
+                        }
+                    }
+                    feedForgeInChunks(md, data1);
+                    feedForgeInChunks(md, data2);
                     const digest = md.digest().bytes();
-
                     // 10. Create PKCS#7 detached signature
                     const p12 = forge.pkcs12.pkcs12FromAsn1(forge.asn1.fromDer(pfxBinary), pfxPassword);
                     const certBags = p12.getBags({ bagType: forge.pki.oids.certBag });
